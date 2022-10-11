@@ -13,9 +13,9 @@ bitflags! {
         const NEGATIVE          = 0b10000000;
     }
 }
-const STATUS_RESET: StatusFlags = StatusFlags { bits: 0b00100100 };
 const STACK: u16 = 0x0100;
 const STACK_RESET: u8 = 0xfd;
+const STATUS_RESET: StatusFlags = StatusFlags { bits: 0b00100100 };
 
 pub struct CPU {
     pub register_a: u8,
@@ -47,9 +47,9 @@ trait Mem {
     fn mem_write(&mut self, addr: u16, data: u8);
 
     fn mem_read_u16(&self, pos: u16) -> u16 {
-        let lo = self.mem_read(pos) as u16;
-        let hi = self.mem_read(pos + 1) as u16;
-        (hi << 8) | (lo as u16)
+        let lo = self.mem_read(pos);
+        let hi = self.mem_read(pos + 1);
+        u16::from_le_bytes([hi, lo])
     }
 
     fn mem_write_u16(&mut self, pos: u16, data: u16) {
@@ -85,7 +85,7 @@ impl CPU {
         }
     }
 
-    fn get_operand_address(&self, mode: &AddressingMode) -> u16 {
+    fn get_address(&self, mode: &AddressingMode) -> u16 {
         match mode {
             AddressingMode::Immediate => self.program_counter,
 
@@ -119,10 +119,10 @@ impl CPU {
 
             AddressingMode::IndirectX => {
                 let base = self.mem_read(self.program_counter);
-
                 let ptr: u8 = base.wrapping_add(self.register_x);
-                let lo = self.mem_read(ptr as u16);
+
                 let hi = self.mem_read_u16(ptr.wrapping_add(1) as u16);
+                let lo = self.mem_read(ptr as u16);
                 (hi as u16) << 8 | (lo as u16)
             }
 
@@ -200,17 +200,17 @@ impl CPU {
     }
 
     fn adc(&mut self, mode: &AddressingMode) {
-        let addr = self.get_operand_address(mode);
+        let addr = self.get_address(mode);
         self.add_to_register_a(self.mem_read(addr));
     }
 
     fn and(&mut self, mode: &AddressingMode) {
-        let addr = self.get_operand_address(mode);
+        let addr = self.get_address(mode);
         self.set_register_a(self.register_a & self.mem_read(addr));
     }
 
     fn bit(&mut self, mode: &AddressingMode) {
-        let addr = self.get_operand_address(mode);
+        let addr = self.get_address(mode);
         let data = self.mem_read(addr);
 
         if self.register_a & data == 0 {
@@ -232,7 +232,7 @@ impl CPU {
     }
 
     fn compare(&mut self, mode: &AddressingMode, compare_with: u8) {
-        let addr = self.get_operand_address(mode);
+        let addr = self.get_address(mode);
         let data = self.mem_read(addr);
 
         self.status.set(StatusFlags::CARRY, compare_with >= data);
@@ -241,7 +241,7 @@ impl CPU {
     }
 
     fn dec(&mut self, mode: &AddressingMode) {
-        let addr = self.get_operand_address(mode);
+        let addr = self.get_address(mode);
         let data = self.mem_read(addr).wrapping_sub(1);
 
         self.mem_write(addr, data);
@@ -257,12 +257,12 @@ impl CPU {
     }
 
     fn eor(&mut self, mode: &AddressingMode) {
-        let addr = self.get_operand_address(mode);
+        let addr = self.get_address(mode);
         self.set_register_a(self.register_a ^ self.mem_read(addr));
     }
     
     fn inc(&mut self, mode: &AddressingMode) {
-        let addr = self.get_operand_address(mode);
+        let addr = self.get_address(mode);
         let data = self.mem_read(addr).wrapping_add(1);
 
         self.mem_write(addr, data);
@@ -278,7 +278,7 @@ impl CPU {
     }
 
     fn lda(&mut self, mode: &AddressingMode) {
-        let addr = self.get_operand_address(mode);
+        let addr = self.get_address(mode);
         let value = self.mem_read(addr);
 
         self.set_register_a(value);
@@ -304,14 +304,14 @@ impl CPU {
     }
 
     fn ldx(&mut self, mode: &AddressingMode) {
-        let addr = self.get_operand_address(mode);
+        let addr = self.get_address(mode);
         let value = self.mem_read(addr);
 
         self.set_register_x(value);
     }
 
     fn ldy(&mut self, mode: &AddressingMode) {
-        let addr = self.get_operand_address(mode);
+        let addr = self.get_address(mode);
         let value = self.mem_read(addr);
 
         self.set_register_y(value);
@@ -326,7 +326,7 @@ impl CPU {
     }
 
     fn asl_addr(&mut self, mode: &AddressingMode) {
-        let addr = self.get_operand_address(mode);
+        let addr = self.get_address(mode);
         let data = self.asl(self.mem_read(addr));
         self.mem_write(addr, data);
     } 
@@ -342,7 +342,7 @@ impl CPU {
     }
 
     fn lsr_addr(&mut self, mode: &AddressingMode) {
-        let addr = self.get_operand_address(mode);
+        let addr = self.get_address(mode);
         let data = self.lsr(self.mem_read(addr));
 
         self.update_negative_flag(data);
@@ -356,7 +356,7 @@ impl CPU {
     }
 
     fn ora(&mut self, mode: &AddressingMode) {
-        let addr = self.get_operand_address(mode);
+        let addr = self.get_address(mode);
         self.set_register_a(self.register_a | self.mem_read(addr));
     }
 
@@ -374,7 +374,7 @@ impl CPU {
     }
 
     fn rol_addr(&mut self, mode: &AddressingMode) {
-        let addr = self.get_operand_address(mode);
+        let addr = self.get_address(mode);
         let data = self.rol(self.mem_read(addr));
 
         self.update_negative_flag(data);
@@ -401,7 +401,7 @@ impl CPU {
     }
 
     fn ror_addr(&mut self, mode: &AddressingMode) {
-        let addr = self.get_operand_address(mode);
+        let addr = self.get_address(mode);
         let data = self.ror(self.mem_read(addr));
 
         self.update_negative_flag(data);
@@ -423,22 +423,22 @@ impl CPU {
     }
 
     fn sbc(&mut self, mode: &AddressingMode) {
-        let addr = self.get_operand_address(mode);
+        let addr = self.get_address(mode);
         self.add_to_register_a(!self.mem_read(addr) + 1);
     }
 
     fn sta(&mut self, mode: &AddressingMode) {
-        let addr = self.get_operand_address(mode);
+        let addr = self.get_address(mode);
         self.mem_write(addr, self.register_a);
     }
 
     fn stx(&mut self, mode: &AddressingMode) {
-        let addr = self.get_operand_address(mode);
+        let addr = self.get_address(mode);
         self.mem_write(addr, self.register_x);
     }
 
     fn sty(&mut self, mode: &AddressingMode) {
-        let addr = self.get_operand_address(mode);
+        let addr = self.get_address(mode);
         self.mem_write(addr, self.register_y);
     }
 
