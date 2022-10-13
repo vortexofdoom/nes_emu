@@ -486,10 +486,22 @@ impl CPU {
                 //AND
                 0x29 | 0x25 | 0x35 | 0x2D | 0x3D | 0x39 | 0x21 | 0x31 => self.and(&opcode.mode),
 
-                //Arithmetic shift left
+                //ASL
                 0x0A => self.asl_accu(),
                 0x06 | 0x16 | 0x0E | 0x1E => self.asl_addr(&opcode.mode),
                 
+                //LSR
+                0x4A => self.lsr_accu(),
+                0x46 | 0x56 | 0x4E | 0x5E => self.lsr_addr(&opcode.mode),
+                
+                //ROL
+                0x2A => self.rol_accu(),
+                0x26 | 0x36 | 0x2E | 0x3E => self.rol_addr(&opcode.mode),
+                
+                //ROR
+                0x6A => self.ror_accu(),
+                0x66 | 0x76 | 0x6E | 0x7E => self.ror_addr(&opcode.mode),
+
                 //Branch on carry flag
                 0x90 => self.branch(!self.status.contains(StatusFlags::CARRY)),
                 0xB0 => self.branch(self.status.contains(StatusFlags::CARRY)),
@@ -502,44 +514,42 @@ impl CPU {
                 0x24 | 0x2C => self.bit(&opcode.mode),
 
                 //Branch on negative
-                /*BPL*/0x10 => self.branch(!self.status.contains(StatusFlags::NEGATIVE)),
-                /*BMI*/0x30 => self.branch(self.status.contains(StatusFlags::NEGATIVE)),
+                /*BPL*/ 0x10 => self.branch(!self.status.contains(StatusFlags::NEGATIVE)),
+                /*BMI*/ 0x30 => self.branch(self.status.contains(StatusFlags::NEGATIVE)),
 
                 //Branch on overflow flag
                 0x50 => self.branch(!self.status.contains(StatusFlags::OVERFLOW)),
                 0x70 => self.branch(self.status.contains(StatusFlags::OVERFLOW)),
-
                 
                 //Set flags
-                /*SEC*/0x38 => self.status |= StatusFlags::CARRY,
-                /*SED*/0xF8 => self.status |= StatusFlags::DECIMAL_MODE,
-                /*SEI*/0x78 => self.status |= StatusFlags::INTERRUPT_DISABLE,
+                /*SEC*/ 0x38 => self.status |= StatusFlags::CARRY,
+                /*SED*/ 0xF8 => self.status |= StatusFlags::DECIMAL_MODE,
+                /*SEI*/ 0x78 => self.status |= StatusFlags::INTERRUPT_DISABLE,
                 
                 //Clear flags
-                /*CLC*/0x18 => self.status &= !StatusFlags::CARRY,
-                /*CLD*/0xD8 => self.status &= !StatusFlags::DECIMAL_MODE,
-                /*CLI*/0x58 => self.status &= !StatusFlags::INTERRUPT_DISABLE,
-                /*CLV*/0xB8 => self.status &= !StatusFlags::OVERFLOW,
+                /*CLC*/ 0x18 => self.status &= !StatusFlags::CARRY,
+                /*CLD*/ 0xD8 => self.status &= !StatusFlags::DECIMAL_MODE,
+                /*CLI*/ 0x58 => self.status &= !StatusFlags::INTERRUPT_DISABLE,
+                /*CLV*/ 0xB8 => self.status &= !StatusFlags::OVERFLOW,
 
                 //Compare
-                /*CMP*/0xC9 | 0xC5 | 0xD5 | 0xCD | 0xDD | 0xD9 | 0xC1 | 0xD1 => self.compare(&opcode.mode, self.register_a),
-                /*CPX*/0xE0 | 0xE4 | 0xEC => self.compare(&opcode.mode, self.register_x),
-                /*CPY*/0xC0 | 0xC4 | 0xCC => self.compare(&opcode.mode, self.register_y),
+                /*CMP*/ 0xC9 | 0xC5 | 0xD5 | 0xCD | 0xDD | 0xD9 | 0xC1 | 0xD1 => self.compare(&opcode.mode, self.register_a),
+                /*CPX*/ 0xE0 | 0xE4 | 0xEC => self.compare(&opcode.mode, self.register_x),
+                /*CPY*/ 0xC0 | 0xC4 | 0xCC => self.compare(&opcode.mode, self.register_y),
 
                 //Increment
-                /*INC*/0xE6 | 0xF6 | 0xEE | 0xFE => self.inc(&opcode.mode),
-                /*INX*/0xE8 => self.set_register_x(self.register_x.wrapping_add(1)),
-                /*INY*/0xC8 => self.set_register_y(self.register_y.wrapping_add(1)),
+                /*INC*/ 0xE6 | 0xF6 | 0xEE | 0xFE => self.inc(&opcode.mode),
+                /*INX*/ 0xE8 => self.set_register_x(self.register_x.wrapping_add(1)),
+                /*INY*/ 0xC8 => self.set_register_y(self.register_y.wrapping_add(1)),
 
                 //Decrement
-                /*DEC*/0xC6 | 0xD6 | 0xCE | 0xDE => self.dec(&opcode.mode),
-                /*DEX*/0xCA => self.set_register_x(self.register_x.wrapping_sub(1)),
-                /*DEY*/0x88 => self.set_register_y(self.register_y.wrapping_sub(1)),
+                /*DEC*/ 0xC6 | 0xD6 | 0xCE | 0xDE => self.dec(&opcode.mode),
+                /*DEX*/ 0xCA => self.set_register_x(self.register_x.wrapping_sub(1)),
+                /*DEY*/ 0x88 => self.set_register_y(self.register_y.wrapping_sub(1)),
 
-                //XOR
-                0x49 | 0x45 | 0x55 | 0x4D | 0x5D | 0x59 | 0x41 | 0x51 => self.eor(&opcode.mode),
+                /*EOR*/ 0x49 | 0x45 | 0x55 | 0x4D | 0x5D | 0x59 | 0x41 | 0x51 => self.eor(&opcode.mode),
 
-                //Jump
+                //JMP
                 0x4C => {
                     let mem_address = self.mem_read_u16(self.program_counter);
                     self.program_counter = mem_address;
@@ -558,16 +568,13 @@ impl CPU {
     
                     self.program_counter = indirect_ref;
                 }
+                //JSR
                 0x20 => self.jsr(),
 
                 //Load registers
-                0xA9 | 0xA5 | 0xB5 | 0xAD | 0xBD | 0xB9 | 0xA1 | 0xB1 => self.lda(&opcode.mode),
-                0xA2 | 0xA6 | 0xB6 | 0xAE | 0xBE => self.ldx(&opcode.mode),
-                0xA0 | 0xA4 | 0xB4 | 0xAC | 0xBC => self.ldy(&opcode.mode),
-
-                //LSR
-                0x4A => self.lsr_accu(),
-                0x46 | 0x56 | 0x4E | 0x5E => self.lsr_addr(&opcode.mode),
+                /*LDA*/ 0xA9 | 0xA5 | 0xB5 | 0xAD | 0xBD | 0xB9 | 0xA1 | 0xB1 => self.lda(&opcode.mode),
+                /*LDX*/ 0xA2 | 0xA6 | 0xB6 | 0xAE | 0xBE => self.ldx(&opcode.mode),
+                /*LDY*/ 0xA0 | 0xA4 | 0xB4 | 0xAC | 0xBC => self.ldy(&opcode.mode),
 
                 //NOP
                 0xEA => {/*No operation*/}
@@ -580,31 +587,26 @@ impl CPU {
                 /*PHP*/ 0x08 => self.php(),
                 /*PLA*/ 0x68 => self.pla(),
                 /*PLP*/ 0x28 => self.plp(),
-                
-                //ROL
-                0x2A => self.rol_accu(),
-                0x26 | 0x36 | 0x2E | 0x3E => self.rol_addr(&opcode.mode),
-                
-                //ROR
-                0x6A => self.ror_accu(),
-                0x66 | 0x76 | 0x6E | 0x7E => self.ror_addr(&opcode.mode),
 
                 //Return from interrupt/Subroutine
-                0x40 => self.rti(),
-                0x60 => self.program_counter = self.stack_pop_u16() + 1,
+                /*RTI*/ 0x40 => self.rti(),
+                /*RTS*/ 0x60 => self.program_counter = self.stack_pop_u16() + 1,
 
                 //Store register contents in memory
-                0x85 | 0x95 | 0x8D | 0x9D | 0x99 | 0x81 | 0x91 => self.sta(&opcode.mode),
-                0x86 | 0x96 | 0x8E => self.stx(&opcode.mode),
-                0x84 | 0x94 | 0x8C => self.sty(&opcode.mode),
+                /*STA*/ 0x85 | 0x95 | 0x8D | 0x9D | 0x99 | 0x81 | 0x91 => self.sta(&opcode.mode),
+                /*STX*/ 0x86 | 0x96 | 0x8E => self.stx(&opcode.mode),
+                /*STY*/ 0x84 | 0x94 | 0x8C => self.sty(&opcode.mode),
 
                 //Transfer between registers
-                /*TAX*/0xAA => self.set_register_x(self.register_a),
-                /*TAY*/0xA8 => self.set_register_y(self.register_a),
-                /*TSX*/0xBA => self.set_register_x(self.stack_pointer),
-                /*TXA*/0x8A => self.set_register_a(self.register_x),
-                /*TXS*/0x9A => self.stack_pointer = self.register_x,
-                /*TYA*/0x98 => self.set_register_a(self.register_y),
+                
+                /*TAX*/ 0xAA => self.set_register_x(self.register_a),
+                /*TAY*/ 0xA8 => self.set_register_y(self.register_a),
+                
+                /*TSX*/ 0xBA => self.set_register_x(self.stack_pointer),
+                /*TXS*/ 0x9A => self.stack_pointer = self.register_x,
+                
+                /*TXA*/ 0x8A => self.set_register_a(self.register_x),
+                /*TYA*/ 0x98 => self.set_register_a(self.register_y),
                 
                 _ => todo!(),
             }
