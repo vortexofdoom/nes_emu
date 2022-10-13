@@ -228,8 +228,7 @@ impl CPU {
         let data = self.mem_read(addr);
 
         self.status.set(StatusFlags::ZERO, self.register_a & data == 0);
-
-        self.update_negative_flag(data);
+        self.status.set(StatusFlags::NEGATIVE, data >> 7 == 1);
         self.status.set(StatusFlags::OVERFLOW, data & StatusFlags::OVERFLOW.bits != 0);
     }
 
@@ -260,14 +259,6 @@ impl CPU {
         self.update_zero_and_negative_flags(data);
     }
 
-    fn dex(&mut self) {
-        self.set_register_x(self.register_x.wrapping_sub(1));
-    }
-
-    fn dey(&mut self) {
-        self.set_register_y(self.register_y.wrapping_sub(1));
-    }
-
     fn eor(&mut self, mode: &AddressingMode) {
         let addr = self.get_address(mode);
         self.set_register_a(self.register_a ^ self.mem_read(addr));
@@ -279,14 +270,6 @@ impl CPU {
 
         self.mem_write(addr, data);
         self.update_zero_and_negative_flags(data);
-    }
-
-    fn inx(&mut self) {
-        self.set_register_x(self.register_x.wrapping_add(1));
-    }
-
-    fn iny(&mut self) {
-        self.set_register_y(self.register_y.wrapping_add(1));
     }
 
     fn lda(&mut self, mode: &AddressingMode) {
@@ -338,7 +321,7 @@ impl CPU {
         let addr = self.get_address(mode);
         let data = self.lsr(self.mem_read(addr));
 
-        self.update_negative_flag(data);
+        self.status.set(StatusFlags::NEGATIVE, data >> 7 == 1);
 
         self.mem_write(addr, data);
     } 
@@ -355,8 +338,7 @@ impl CPU {
 
     fn php(&mut self) {
         let mut flags = self.status.clone();
-        flags.insert(StatusFlags::BREAK);
-        flags.insert(StatusFlags::BREAK2);
+        flags.insert(StatusFlags::BREAK | StatusFlags::BREAK2);
         self.stack_push(flags.bits);
     }
 
@@ -367,8 +349,7 @@ impl CPU {
 
     fn plp(&mut self) {
         self.status.bits = self.stack_pop();
-        self.status.remove(StatusFlags::BREAK);
-        self.status.remove(StatusFlags::BREAK2);
+        self.status.remove(StatusFlags::BREAK | StatusFlags::BREAK2);
     }
 
     fn rol(&mut self, mut data: u8) -> u8 {
@@ -378,7 +359,7 @@ impl CPU {
 
         data <<= 1;
         if carry {
-            data |= 1;
+            data |= 0b0000_0001;
         }
 
         data
@@ -388,7 +369,7 @@ impl CPU {
         let addr = self.get_address(mode);
         let data = self.rol(self.mem_read(addr));
 
-        self.update_negative_flag(data);
+        self.status.set(StatusFlags::NEGATIVE, data >> 7 == 1);
 
         self.mem_write(addr, data);
     }
@@ -405,7 +386,7 @@ impl CPU {
 
         data >>= 1;
         if carry {
-            data |= 0b10000000;
+            data |= 0b1000_0000;
         }
 
         data
@@ -415,7 +396,7 @@ impl CPU {
         let addr = self.get_address(mode);
         let data = self.ror(self.mem_read(addr));
 
-        self.update_negative_flag(data);
+        self.status.set(StatusFlags::NEGATIVE, data >> 7 == 1);
 
         self.mem_write(addr, data);
     }
@@ -427,8 +408,8 @@ impl CPU {
 
     fn rti(&mut self) {
         self.status = StatusFlags { bits: self.stack_pop() };
-        self.status &= !StatusFlags::BREAK;
-        self.status |= StatusFlags::BREAK2;
+        self.status.remove(StatusFlags::BREAK);
+        self.status.insert(StatusFlags::BREAK2);
 
         self.program_counter = self.stack_pop_u16() + 1;
     }
@@ -453,37 +434,9 @@ impl CPU {
         self.mem_write(addr, self.register_y);
     }
 
-    fn tax(&mut self) {
-        self.set_register_x(self.register_a);
-    }
-
-    fn tay(&mut self) {
-        self.set_register_y(self.register_a);
-    }
-
-    fn tsx(&mut self) {
-        self.set_register_x(self.stack_pointer);
-    }
-
-    fn txa(&mut self) {
-        self.set_register_a(self.register_x);
-    }
-
-    fn txs(&mut self) {
-        self.stack_pointer = self.register_x;
-    }
-    
-    fn tya(&mut self) {
-        self.set_register_a(self.register_y);
-    }
-
-    fn update_negative_flag(&mut self, result: u8) {
-        self.status.set(StatusFlags::NEGATIVE, result >> 7 == 1);
-    }
-
     fn update_zero_and_negative_flags(&mut self, result: u8) {
         self.status.set(StatusFlags::ZERO, result == 0);
-        self.update_negative_flag(result);
+        self.status.set(StatusFlags::NEGATIVE, result >> 7 == 1);
     }
 
     pub fn load_and_run(&mut self, program: Vec<u8>) {
@@ -527,6 +480,8 @@ impl CPU {
 
                 //Add with carry
                 0x69 | 0x65 | 0x75 | 0x6D | 0x7D | 0x79 | 0x61 | 0x71 => self.adc(&opcode.mode),
+                //Subtract with carry
+                0xE9 | 0xE5 | 0xF5 | 0xED | 0xFD | 0xF9 | 0xE1 | 0xF1 => self.sbc(&opcode.mode),
 
                 //AND
                 0x29 | 0x25 | 0x35 | 0x2D | 0x3D | 0x39 | 0x21 | 0x31 => self.and(&opcode.mode),
@@ -554,29 +509,35 @@ impl CPU {
                 0x50 => self.branch(!self.status.contains(StatusFlags::OVERFLOW)),
                 0x70 => self.branch(self.status.contains(StatusFlags::OVERFLOW)),
 
+                
+                //Set flags
+                /*SEC*/0x38 => self.status |= StatusFlags::CARRY,
+                /*SED*/0xF8 => self.status |= StatusFlags::DECIMAL_MODE,
+                /*SEI*/0x78 => self.status |= StatusFlags::INTERRUPT_DISABLE,
+                
                 //Clear flags
-                0x18 => self.status &= !StatusFlags::CARRY,
-                0xD8 => self.status &= !StatusFlags::DECIMAL_MODE,
-                0x58 => self.status &= !StatusFlags::INTERRUPT_DISABLE,
-                0xB8 => self.status &= !StatusFlags::OVERFLOW,
+                /*CLC*/0x18 => self.status &= !StatusFlags::CARRY,
+                /*CLD*/0xD8 => self.status &= !StatusFlags::DECIMAL_MODE,
+                /*CLI*/0x58 => self.status &= !StatusFlags::INTERRUPT_DISABLE,
+                /*CLV*/0xB8 => self.status &= !StatusFlags::OVERFLOW,
 
                 //Compare
-                0xC9 | 0xC5 | 0xD5 | 0xCD | 0xDD | 0xD9 | 0xC1 | 0xD1 => self.compare(&opcode.mode, self.register_a),
-                0xE0 | 0xE4 | 0xEC => self.compare(&opcode.mode, self.register_x),
-                0xC0 | 0xC4 | 0xCC => self.compare(&opcode.mode, self.register_y),
+                /*CMP*/0xC9 | 0xC5 | 0xD5 | 0xCD | 0xDD | 0xD9 | 0xC1 | 0xD1 => self.compare(&opcode.mode, self.register_a),
+                /*CPX*/0xE0 | 0xE4 | 0xEC => self.compare(&opcode.mode, self.register_x),
+                /*CPY*/0xC0 | 0xC4 | 0xCC => self.compare(&opcode.mode, self.register_y),
+
+                //Increment
+                /*INC*/0xE6 | 0xF6 | 0xEE | 0xFE => self.inc(&opcode.mode),
+                /*INX*/0xE8 => self.set_register_x(self.register_x.wrapping_add(1)),
+                /*INY*/0xC8 => self.set_register_y(self.register_y.wrapping_add(1)),
 
                 //Decrement
-                0xC6 | 0xD6 | 0xCE | 0xDE => self.dec(&opcode.mode),
-                0xCA => self.dex(),
-                0x88 => self.dey(),
+                /*DEC*/0xC6 | 0xD6 | 0xCE | 0xDE => self.dec(&opcode.mode),
+                /*DEX*/0xCA => self.set_register_x(self.register_x.wrapping_sub(1)),
+                /*DEY*/0x88 => self.set_register_y(self.register_y.wrapping_sub(1)),
 
                 //XOR
                 0x49 | 0x45 | 0x55 | 0x4D | 0x5D | 0x59 | 0x41 | 0x51 => self.eor(&opcode.mode),
-
-                //Increment
-                0xE6 | 0xF6 | 0xEE | 0xFE => self.inc(&opcode.mode),
-                0xE8 => self.inx(),
-                0xC8 => self.iny(),
 
                 //Jump
                 0x4C => {
@@ -604,23 +565,22 @@ impl CPU {
                 0xA2 | 0xA6 | 0xB6 | 0xAE | 0xBE => self.ldx(&opcode.mode),
                 0xA0 | 0xA4 | 0xB4 | 0xAC | 0xBC => self.ldy(&opcode.mode),
 
-                //Logical shift right
+                //LSR
                 0x4A => self.lsr_accu(),
                 0x46 | 0x56 | 0x4E | 0x5E => self.lsr_addr(&opcode.mode),
 
-                //No operation
-                0xEA => {}
+                //NOP
+                0xEA => {/*No operation*/}
 
-                //OR
+                //OR A
                 0x09 | 0x05 | 0x15 | 0x0D | 0x1D | 0x19 | 0x01 | 0x11 => self.ora(&opcode.mode),
 
                 //Push/Pop stack
-                /*PHA*/0x48 => self.stack_push(self.register_a),
-                /*PHP*/0x08 => self.php(),
-                /*PLA*/0x68 => self.pla(),
-                /*PLP*/0x28 => self.plp(),
+                /*PHA*/ 0x48 => self.stack_push(self.register_a),
+                /*PHP*/ 0x08 => self.php(),
+                /*PLA*/ 0x68 => self.pla(),
+                /*PLP*/ 0x28 => self.plp(),
                 
-
                 //ROL
                 0x2A => self.rol_accu(),
                 0x26 | 0x36 | 0x2E | 0x3E => self.rol_addr(&opcode.mode),
@@ -633,26 +593,18 @@ impl CPU {
                 0x40 => self.rti(),
                 0x60 => self.program_counter = self.stack_pop_u16() + 1,
 
-                //Subtract with carry
-                0xE9 | 0xE5 | 0xF5 | 0xED | 0xFD | 0xF9 | 0xE1 | 0xF1 => self.sbc(&opcode.mode),
-
-                //Set flags
-                0x38 => self.status |= StatusFlags::CARRY,
-                0xF8 => self.status |= StatusFlags::DECIMAL_MODE,
-                0x78 => self.status |= StatusFlags::INTERRUPT_DISABLE,
-
                 //Store register contents in memory
                 0x85 | 0x95 | 0x8D | 0x9D | 0x99 | 0x81 | 0x91 => self.sta(&opcode.mode),
                 0x86 | 0x96 | 0x8E => self.stx(&opcode.mode),
                 0x84 | 0x94 | 0x8C => self.sty(&opcode.mode),
 
                 //Transfer between registers
-                0xAA => self.tax(),
-                0xA8 => self.tay(),
-                0xBA => self.tsx(),
-                0x8A => self.txa(),
-                0x9A => self.txs(),
-                0x98 => self.tya(),
+                /*TAX*/0xAA => self.set_register_x(self.register_a),
+                /*TAY*/0xA8 => self.set_register_y(self.register_a),
+                /*TSX*/0xBA => self.set_register_x(self.stack_pointer),
+                /*TXA*/0x8A => self.set_register_a(self.register_x),
+                /*TXS*/0x9A => self.stack_pointer = self.register_x,
+                /*TYA*/0x98 => self.set_register_a(self.register_y),
                 
                 _ => todo!(),
             }
