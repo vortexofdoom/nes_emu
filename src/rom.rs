@@ -25,7 +25,7 @@ impl Rom {
         
         let trainer = file[6] & 0b0000_0100 != 0;
         
-        let prg_rom_start = 16 + if trainer {512} else {0};
+        let prg_rom_start = 16 + if trainer { 512 } else { 0 };
         let chr_rom_start = prg_rom_start + len_prg_rom;
 
         //let has_battery_ram = file[6] & 0b0000_0010 != 0;
@@ -40,6 +40,7 @@ impl Rom {
 
         // First 4 bits of F7 followed by First 4 bits of F6
         let mapper = (file[7] & 0b1111_0000) | (file[6] >> 4);
+
         if (file[7] >> 2) & 0b0000_0011 != 0 {
             return Err(String::from("NES2.0 format not supported"));
         }
