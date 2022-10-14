@@ -30,10 +30,26 @@ pub fn trace(cpu: &CPU) -> String {
             hex_dump.push(address);
 
             match op.mode {
-                AddressingMode::Immediate => format!("#${:02x}", address),
-                AddressingMode::ZeroPage => format!("${:02x} = {:02x}", mem_addr, value),
-                AddressingMode::ZeroPageX => format!("${:02x},X @ {:02x} = {:02x}",address, mem_addr, value),
-                AddressingMode::ZeroPageY => format!("${:02x},Y @ {:02x} = {:02x}",address, mem_addr, value),
+                AddressingMode::Immediate => format!(
+                    "#${:02x}", address
+                ),
+                AddressingMode::ZeroPage => format!(
+                    "${:02x} = {:02x}",
+                    mem_addr,
+                    value
+                ),
+                AddressingMode::ZeroPageX => format!(
+                    "${:02x},X @ {:02x} = {:02x}",
+                    address,
+                    mem_addr,
+                    value
+                ),
+                AddressingMode::ZeroPageY => format!(
+                    "${:02x},Y @ {:02x} = {:02x}",
+                    address,
+                    mem_addr,
+                    value
+                ),
                 AddressingMode::IndirectX => format!(
                     "(${:02x},X) @ {:02x} = {:04x} = {:02x}",
                     address, 
@@ -42,7 +58,7 @@ pub fn trace(cpu: &CPU) -> String {
                     value
                 ),
                 AddressingMode::IndirectY => format!(
-                    "(${:02x}),Y @ {:04x} = {:04x} = {:02x}",
+                    "(${:02x}),Y = {:04x} @ {:04x} = {:02x}",
                     address, 
                     mem_addr.wrapping_sub(cpu.register_y as u16), 
                     mem_addr, 
