@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, result};
 use crate::{opcodes, bus::Bus};
 
 bitflags! {
@@ -47,11 +47,11 @@ pub enum AddressingMode {
 }
 
 pub trait Mem {
-    fn mem_read(&self, addr: u16) -> u8;
+    fn mem_read(&mut self, addr: u16) -> u8;
 
     fn mem_write(&mut self, addr: u16, data: u8);
     
-    fn mem_read_u16(&self, pos: u16) -> u16 {
+    fn mem_read_u16(&mut self, pos: u16) -> u16 {
         let lo = self.mem_read(pos) as u16;
         let hi = self.mem_read(pos + 1) as u16;
         (hi << 8) | (lo as u16)
@@ -67,7 +67,7 @@ pub trait Mem {
 
 impl Mem for CPU {
     
-    fn mem_read(&self, addr: u16) -> u8 {
+    fn mem_read(&mut self, addr: u16) -> u8 {
         self.bus.mem_read(addr)
     }
     
@@ -75,7 +75,7 @@ impl Mem for CPU {
         self.bus.mem_write(addr, data);
     }
 
-    fn mem_read_u16(&self, pos: u16) -> u16 {
+    fn mem_read_u16(&mut self, pos: u16) -> u16 {
         self.bus.mem_read_u16(pos)
     }
 
@@ -97,14 +97,14 @@ impl CPU {
         }
     }
 
-    fn get_op_addr(&self, mode: &AddressingMode) -> u16 {
+    fn get_op_addr(&mut self, mode: &AddressingMode) -> u16 {
         match mode {
             AddressingMode::Immediate => self.program_counter,
             _ => self.get_address(mode, self.program_counter),
         }
     }
 
-    pub fn get_address(&self, mode: &AddressingMode, addr: u16) -> u16 {
+    pub fn get_address(&mut self, mode: &AddressingMode, addr: u16) -> u16 {
         match mode {
             AddressingMode::Immediate => addr,
 
@@ -224,12 +224,14 @@ impl CPU {
 
     fn adc(&mut self, mode: &AddressingMode) {
         let addr = self.get_op_addr(mode);
-        self.add_to_register_a(self.mem_read(addr));
+        let data = self.mem_read(addr);
+        self.add_to_register_a(data);
     }
 
     fn and(&mut self, mode: &AddressingMode) {
         let addr = self.get_op_addr(mode);
-        self.set_register_a(self.register_a & self.mem_read(addr));
+        let data = self.mem_read(addr);
+        self.set_register_a(self.register_a & data);
     }
 
     fn bit(&mut self, mode: &AddressingMode) {
@@ -268,7 +270,8 @@ impl CPU {
 
     fn eor(&mut self, mode: &AddressingMode) {
         let addr = self.get_op_addr(mode);
-        self.set_register_a(self.register_a ^ self.mem_read(addr));
+        let data = self.mem_read(addr);
+        self.set_register_a(self.register_a ^ data);
     }
 
     fn inc(&mut self, mode: &AddressingMode) {
@@ -280,7 +283,7 @@ impl CPU {
     }
 
     
-    pub fn jmp_indirect(&self, addr: u16) -> u16 {
+    pub fn jmp_indirect(&mut self, addr: u16) -> u16 {
         let indirect_ref = if addr & 0x00FF == 0x00FF {
             let hi = self.mem_read(addr & 0xFF00);
             let lo = self.mem_read(addr);
@@ -323,8 +326,9 @@ impl CPU {
 
     fn asl_addr(&mut self, mode: &AddressingMode) {
         let addr = self.get_op_addr(mode);
-        let data = self.asl(self.mem_read(addr));
-        self.mem_write(addr, data);
+        let data = self.mem_read(addr);
+        let result = self.asl(data);
+        self.mem_write(addr, result);
     } 
 
     fn asl_accu(&mut self) {
@@ -339,10 +343,11 @@ impl CPU {
 
     fn lsr_addr(&mut self, mode: &AddressingMode) {
         let addr = self.get_op_addr(mode);
-        let data = self.lsr(self.mem_read(addr));
+        let data = self.mem_read(addr);
+        let result = self.lsr(data);
 
-        self.update_zero_and_negative_flags(data);
-        self.mem_write(addr, data);
+        self.update_zero_and_negative_flags(result);
+        self.mem_write(addr, result);
     } 
 
     fn lsr_accu(&mut self) {
@@ -352,7 +357,8 @@ impl CPU {
 
     fn ora(&mut self, mode: &AddressingMode) {
         let addr = self.get_op_addr(mode);
-        self.set_register_a(self.register_a | self.mem_read(addr));
+        let data = self.mem_read(addr);
+        self.set_register_a(self.register_a | data);
     }
 
     fn php(&mut self) {
@@ -387,11 +393,12 @@ impl CPU {
 
     fn rol_addr(&mut self, mode: &AddressingMode) {
         let addr = self.get_op_addr(mode);
-        let data = self.rol(self.mem_read(addr));
+        let data = self.mem_read(addr);
+        let result = self.rol(data);
 
-        self.status.set(StatusFlags::NEGATIVE, data >> 7 == 1);
+        self.status.set(StatusFlags::NEGATIVE, result >> 7 == 1);
 
-        self.mem_write(addr, data);
+        self.mem_write(addr, result);
     }
 
     fn rol_accu(&mut self) {
@@ -414,11 +421,12 @@ impl CPU {
 
     fn ror_addr(&mut self, mode: &AddressingMode) {
         let addr = self.get_op_addr(mode);
-        let data = self.ror(self.mem_read(addr));
+        let data = self.mem_read(addr);
+        let result = self.ror(data);
 
-        self.status.set(StatusFlags::NEGATIVE, data >> 7 == 1);
+        self.status.set(StatusFlags::NEGATIVE, result >> 7 == 1);
 
-        self.mem_write(addr, data);
+        self.mem_write(addr, result);
     }
 
     fn ror_accu(&mut self) {
@@ -672,7 +680,6 @@ impl CPU {
         let addr = self.get_op_addr(mode);
         let data = self.register_a & self.register_x;
         self.mem_write(addr, data);
-        self.update_zero_and_negative_flags(data);
     }
 
     fn arr(&mut self, mode: &AddressingMode) {
@@ -743,36 +750,36 @@ impl CPU {
 
     fn rla(&mut self, mode: &AddressingMode) {
         let addr = self.get_op_addr(mode);
-        let data = self.rol(self.mem_read(addr));
+        let data = self.mem_read(addr);
+        let result = self.rol(data);
 
-        self.status.set(StatusFlags::NEGATIVE, data >> 7 == 1);
-
-        self.mem_write(addr, data);
-        self.set_register_a(self.register_a & data);
+        self.mem_write(addr, result);
+        self.set_register_a(self.register_a & result);
     }
 
     fn rra(&mut self, mode: &AddressingMode) {
         let addr = self.get_op_addr(mode);
-        let data = self.ror(self.mem_read(addr));
+        let data = self.mem_read(addr);
+        let result = self.ror(data);
 
-        self.status.set(StatusFlags::NEGATIVE, data >> 7 == 1);
-
-        self.mem_write(addr, data);
-        self.set_register_a(self.register_a & data);
+        self.mem_write(addr, result);
+        self.set_register_a(self.register_a & result);
     }
 
     fn slo(&mut self, mode: &AddressingMode) {
         let addr = self.get_op_addr(mode);
-        let data = self.asl(self.mem_read(addr));
+        let data = self.mem_read(addr);
+        let result = self.asl(data);
         
-        self.mem_write(addr, data);
-        self.set_register_a(self.register_a | data);
+        self.mem_write(addr, result);
+        self.set_register_a(self.register_a | result);
     }
 
     fn sre(&mut self, mode: &AddressingMode) {
         let addr = self.get_op_addr(mode);
-        let data = self.lsr(self.mem_read(addr));
-        self.set_register_a(self.register_a ^ data);
+        let data = self.mem_read(addr);
+        let result = self.lsr(data);
+        self.set_register_a(self.register_a ^ result);
     }
 
     fn shx(&mut self, mode: &AddressingMode) {

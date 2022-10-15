@@ -1,6 +1,7 @@
 pub mod cpu;
 pub mod opcodes;
 pub mod bus;
+pub mod ppu;
 pub mod rom;
 pub mod trace;
 
@@ -36,7 +37,7 @@ fn color(byte: u8) -> Color {
     }
 }
 
-fn read_screen_state(cpu: &CPU, frame: &mut [u8; 32 * 3 * 32]) -> bool {
+fn read_screen_state(cpu: &mut CPU, frame: &mut [u8; 32 * 3 * 32]) -> bool {
     let mut frame_idx = 0;
     let mut update = false;
     for i in 0x0200..0x0600 {
@@ -105,7 +106,7 @@ fn main() {
     // let mut rng = rand::thread_rng();
 
     cpu.run(move |cpu| {
-        println!("{}",trace(&cpu));
+        println!("{}",trace(cpu));
         // handle_user_input(cpu, &mut event_pump);
 
         // cpu.mem_write(0xfe, rng.gen_range(1..16));

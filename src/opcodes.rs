@@ -79,7 +79,7 @@ lazy_static! {
         OpCode::new(0x05, "ORA", 2, 3, ZeroPage),
         OpCode::new(0x15, "ORA", 2, 4, ZeroPageX),
         OpCode::new(0x0D, "ORA", 3, 4, Absolute),
-        OpCode::new(0x1E, "ORA", 3, 4/*+1 if page crossed*/, AbsoluteX),
+        OpCode::new(0x1D, "ORA", 3, 4/*+1 if page crossed*/, AbsoluteX),
         OpCode::new(0x19, "ORA", 3, 4/*+1 if page crossed*/, AbsoluteY),
         OpCode::new(0x01, "ORA", 2, 6, IndirectX),
         OpCode::new(0x11, "ORA", 2, 5/*+1 if page crossed*/, IndirectY),
