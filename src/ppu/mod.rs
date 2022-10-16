@@ -29,6 +29,9 @@ pub struct PPU {
     pub scroll: Scroll,
     pub status: PPUStatus,
     pub mask: PPUMask,
+
+    scanline: u16,
+    cycles: usize,
 }
 
 impl PPU {
@@ -46,10 +49,33 @@ impl PPU {
             scroll: Scroll::new(),
             status: PPUStatus::new(),
             read_buf: 0,
+            scanline: 0,
+            cycles: 0,
         }
     }
 
-    fn read_status(&mut self) -> u8 {
+    pub fn tick(&mut self, cycles: u8) {
+        self.cycles += cycles as usize;
+        if self.cycles >= 341 {
+            self.cycles -= 341;
+            self.scanline += 1;
+
+            if self.scanline == 241 {
+                if self.ctrl.contains(PPUCtrl::NMI_GENERATE) {
+                    self.status.set_vblank(true);
+                    todo!("NMI interrupt")
+                }
+            }
+
+            if self.scanline >= 262 {
+                self.scanline = 0;
+                self.status.set_vblank(false);
+            }
+        }
+
+    }
+
+    pub fn read_status(&mut self) -> u8 {
         let data = self.status.bits();
         self.status.remove(PPUStatus::VBLANK);
         self.addr.reset_latch();
@@ -79,6 +105,10 @@ impl PPU {
 
     pub fn set_oam_addr(&mut self, data: u8) {
         self.oam_addr = data;
+    }
+
+    pub fn read_oam(&self) -> u8 {
+        self.oam[self.oam_addr as usize]
     }
 
     pub fn write_to_oam(&mut self, data: u8) {

@@ -84,6 +84,10 @@ impl Mem for CPU {
     }
 }
 
+pub struct Interrupt {
+    
+}
+
 impl CPU {
     pub fn new(bus: Bus) -> Self {
         CPU { 
@@ -226,12 +230,20 @@ impl CPU {
         let addr = self.get_op_addr(mode);
         let data = self.mem_read(addr);
         self.add_to_register_a(data);
+
+        if let AddressingMode::AbsoluteX | AddressingMode::AbsoluteY | AddressingMode::IndirectY = mode {
+            self.check_if_same_page(addr);
+        }
     }
 
     fn and(&mut self, mode: &AddressingMode) {
         let addr = self.get_op_addr(mode);
         let data = self.mem_read(addr);
         self.set_register_a(self.register_a & data);
+
+        if let AddressingMode::AbsoluteX | AddressingMode::AbsoluteY | AddressingMode::IndirectY = mode {
+            self.check_if_same_page(addr);
+        }
     }
 
     fn bit(&mut self, mode: &AddressingMode) {
@@ -246,9 +258,12 @@ impl CPU {
     fn branch(&mut self, condition: bool) {
         if condition {
             let jump = self.mem_read(self.program_counter) as i8;
-            self.program_counter = self.program_counter
+            let old_addr = self.program_counter;
+            let jump_addr = self.program_counter
                 .wrapping_add(1)
                 .wrapping_add(jump as u16);
+            self.check_if_same_page(jump_addr);
+            self.program_counter = self.program_counter.wrapping_add(jump_addr);
         }
     }
 
@@ -258,6 +273,10 @@ impl CPU {
 
         self.status.set(StatusFlags::CARRY, data <= compare_with);
         self.update_zero_and_negative_flags(compare_with.wrapping_sub(data));
+        
+        if let AddressingMode::AbsoluteX | AddressingMode::AbsoluteY | AddressingMode::IndirectY = mode {
+            self.check_if_same_page(addr);
+        }
     }
 
     fn dec(&mut self, mode: &AddressingMode) {
@@ -271,7 +290,12 @@ impl CPU {
     fn eor(&mut self, mode: &AddressingMode) {
         let addr = self.get_op_addr(mode);
         let data = self.mem_read(addr);
+        
         self.set_register_a(self.register_a ^ data);
+
+        if let AddressingMode::AbsoluteX | AddressingMode::AbsoluteY | AddressingMode::IndirectY = mode {
+            self.check_if_same_page(addr);
+        }
     }
 
     fn inc(&mut self, mode: &AddressingMode) {
@@ -300,6 +324,10 @@ impl CPU {
         let value = self.mem_read(addr);
 
         self.set_register_a(value);
+
+        if let AddressingMode::AbsoluteX | AddressingMode::AbsoluteY | AddressingMode::IndirectY = mode {
+            self.check_if_same_page(addr);
+        }
     }
 
     fn ldx(&mut self, mode: &AddressingMode) {
@@ -307,6 +335,10 @@ impl CPU {
         let value = self.mem_read(addr);
 
         self.set_register_x(value);
+        
+        if let AddressingMode::AbsoluteY  = mode {
+            self.check_if_same_page(addr);
+        }
     }
 
     fn ldy(&mut self, mode: &AddressingMode) {
@@ -314,6 +346,10 @@ impl CPU {
         let value = self.mem_read(addr);
 
         self.set_register_y(value);
+
+        if let AddressingMode::AbsoluteX  = mode {
+            self.check_if_same_page(addr);
+        }
     }
 
     fn asl(&mut self, mut data: u8) -> u8 {
@@ -359,6 +395,10 @@ impl CPU {
         let addr = self.get_op_addr(mode);
         let data = self.mem_read(addr);
         self.set_register_a(self.register_a | data);
+
+        if let AddressingMode::AbsoluteX | AddressingMode::AbsoluteY | AddressingMode::IndirectY = mode {
+            self.check_if_same_page(addr);
+        }
     }
 
     fn php(&mut self) {
@@ -446,6 +486,10 @@ impl CPU {
         let addr = self.get_op_addr(mode);
         let data = self.mem_read(addr) as i8;
         self.add_to_register_a(data.wrapping_neg().wrapping_sub(1) as u8);
+
+        if let AddressingMode::AbsoluteX | AddressingMode::AbsoluteY | AddressingMode::IndirectY = mode {
+            self.check_if_same_page(addr);
+        }
     }
 
     fn sta(&mut self, mode: &AddressingMode) {
@@ -472,6 +516,12 @@ impl CPU {
         self.load(program);
         self.reset();
         self.run(|_| {})
+    }
+
+    pub fn check_if_same_page(&mut self, addr: u16) {
+        if self.program_counter >> 8 != addr >> 8 {
+            self.program_counter = self.program_counter.wrapping_add(1);
+        }
     }
 
     pub fn load(&mut self, program: Vec<u8>) {
@@ -628,9 +678,12 @@ impl CPU {
                 //NOP
                 /*official*/    0xEA | 
                 /*unofficial*/  0x1A | 0x3A | 0x5A | 0x7A | 0xDA | 0xFA |
-                /*DOP 2 bytes*/ 0x04 | 0x14 | 0x34 | 0x44 | 0x54 | 0x64 | 0x74 | 0x80 | 0x82 | 0x89 | 0xC2 | 0xD4 | 0xE2 |0xF4 |
-                /*TOP 3 bytes*/ 0x0C | 0x1C | 0x3C | 0x5C | 0x7C | 0xDC | 0xFC => {
-                    /*No operation*/
+                /*DOP 2 bytes*/ 0x04 | 0x14 | 0x34 | 0x44 | 0x54 | 0x64 | 
+                                0x74 | 0x80 | 0x82 | 0x89 | 0xC2 | 0xD4 | 0xE2 |0xF4 |
+                /*TOP 3 bytes*/ 0x0C => {}
+                 0x1C | 0x3C | 0x5C | 0x7C | 0xDC | 0xFC => {
+                    let addr = self.get_op_addr(&opcode.mode);
+                    self.check_if_same_page(addr);
                 }
 
 
@@ -660,6 +713,8 @@ impl CPU {
                 /*XAA*/ 0x8B => {/*unknown*/}
                 /*TAS*/ 0x9B => self.tas(&opcode.mode),
             }
+
+            self.bus.tick(opcode.cycles);
 
             if self.program_counter == counter_state {
                 self.program_counter += (opcode.len - 1) as u16;
@@ -806,13 +861,19 @@ impl CPU {
         self.stack_pointer &= self.mem_read(addr);
         self.register_x = self.stack_pointer;
         self.set_register_a(self.stack_pointer);
+        self.check_if_same_page(addr);
     }
 
     fn lax(&mut self, mode: &AddressingMode) {
         let addr = self.get_op_addr(mode);
         let data = self.mem_read(addr);
+        
         self.register_x = data;
         self.set_register_a(data);
+        
+        if let AddressingMode::AbsoluteX | AddressingMode::AbsoluteY | AddressingMode::IndirectY = mode {
+            self.check_if_same_page(addr);
+        }
     }
 
 

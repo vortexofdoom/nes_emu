@@ -4,6 +4,8 @@ pub struct Bus {
     cpu_ram: [u8; 2048],
     prg_rom: Vec<u8>,
     ppu: PPU,
+
+    cycles: usize,
 }
 
 impl Bus {
@@ -13,7 +15,13 @@ impl Bus {
             cpu_ram: [0; 2048],
             prg_rom: rom.prg_rom,
             ppu,
+            cycles: 0,
         }
+    }
+
+    pub fn tick(&mut self, cycles: u8) {
+        self.cycles += cycles as usize;
+        self.ppu.tick(cycles * 3);
     }
 
     fn read_prg_rom(&self, mut addr: u16) -> u8 {
@@ -30,6 +38,8 @@ impl Mem for Bus {
         match addr {
             0x0000..=0x1FFF => self.cpu_ram[(addr & 0b0000_0111_1111_1111) as usize],
             0x2000 | 0x2001 | 0x2003 | 0x2005 | 0x2006 | 0x4014 => panic!("Attempt to read from write only PPU Address {:x}", addr),
+            0x2002          => self.ppu.read_status(),
+            0x2004          => self.ppu.read_oam(),
             0x2007          => self.ppu.read_data(),
             0x2008..=0x3FFF => self.mem_read(addr & 0x2007), 
             0x8000..=0xFFFF => self.read_prg_rom(addr),
@@ -42,6 +52,7 @@ impl Mem for Bus {
             0x0000..=0x1FFF => self.cpu_ram[(addr & 0b0000_0111_1111_1111) as usize] = data,
             0x2000          => self.ppu.ctrl.update(data),
             0x2001          => self.ppu.mask.set_bits(data),
+            0x2002          => panic!("Cannot write to PPU status register"),
             0x2003          => self.ppu.set_oam_addr(data),
             0x2004          => self.ppu.write_to_oam(data),
             0x2005          => self.ppu.scroll.set(data),
