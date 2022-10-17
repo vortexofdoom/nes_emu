@@ -24,6 +24,10 @@ impl Bus {
         self.ppu.tick(cycles * 3);
     }
 
+    pub fn poll_nmi_interrupt(&self) -> bool {
+        self.ppu.nmi_interrupt
+    }
+
     fn read_prg_rom(&self, mut addr: u16) -> u8 {
         addr -= 0x8000;
         if addr >= self.prg_rom.len() as u16 {
@@ -50,7 +54,7 @@ impl Mem for Bus {
     fn mem_write(&mut self, addr: u16, data: u8) {
         match addr {
             0x0000..=0x1FFF => self.cpu_ram[(addr & 0b0000_0111_1111_1111) as usize] = data,
-            0x2000          => self.ppu.ctrl.update(data),
+            0x2000          => self.ppu.write_to_ctrl(data),
             0x2001          => self.ppu.mask.set_bits(data),
             0x2002          => panic!("Cannot write to PPU status register"),
             0x2003          => self.ppu.set_oam_addr(data),

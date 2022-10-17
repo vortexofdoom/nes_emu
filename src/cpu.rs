@@ -2,7 +2,7 @@ use std::{collections::HashMap, result};
 use crate::{opcodes, bus::Bus};
 
 bitflags! {
-    pub struct StatusFlags: u8 {
+    pub struct CPUStatus: u8 {
         const CARRY             = 0b00000001;
         const ZERO              = 0b00000010;
         const INTERRUPT_DISABLE = 0b00000100;
@@ -14,9 +14,9 @@ bitflags! {
     }
 }
 
-impl Default for StatusFlags {
+impl Default for CPUStatus {
     fn default() -> Self {
-        StatusFlags::INTERRUPT_DISABLE | StatusFlags::BREAK2
+        CPUStatus::INTERRUPT_DISABLE | CPUStatus::BREAK2
     }
 }
 const STACK: u16 = 0x0100;
@@ -27,7 +27,7 @@ pub struct CPU {
     pub register_x: u8,
     pub register_y: u8,
     pub stack_pointer: u8,
-    pub status: StatusFlags,
+    pub status: CPUStatus,
     pub program_counter: u16,
     pub bus: Bus,
 }
@@ -88,8 +88,30 @@ fn page_crossed(addr1: u16, addr2: u16) -> bool {
     addr1 >> 8 != addr2 >> 8
 }
 
-pub struct Interrupt {
+mod interrupt {
+    use super::CPUStatus;
 
+    #[derive(PartialEq, Eq)]
+    pub(super) struct Interrupt {
+        pub(super) vector_addr: u16,
+        pub(super) flags: CPUStatus,
+        pub(super) cpu_cycles: u8,
+    }
+    pub(super) const NMI: Interrupt = Interrupt {
+        vector_addr: 0xFFFA,
+        flags: CPUStatus { bits: 0b00100000 },
+        cpu_cycles: 2,
+    };
+    pub(super) const BRK: Interrupt = Interrupt {
+        vector_addr: 0xFFFE,
+        flags: CPUStatus { bits: 0b00110000 },
+        cpu_cycles: 2,
+    };
+    pub(super) const IRQ: Interrupt = Interrupt {
+        vector_addr: 0xFFFE,
+        flags: CPUStatus { bits: 0b00100000 },
+        cpu_cycles: 2,
+    };
 }
 
 impl CPU {
@@ -99,7 +121,7 @@ impl CPU {
             register_x: 0, 
             register_y: 0,
             stack_pointer: STACK_RESET,
-            status: StatusFlags::default(),
+            status: CPUStatus::default(),
             program_counter: 0, 
             bus,
         }
@@ -187,7 +209,7 @@ impl CPU {
     fn add_to_register_a(&mut self, data: u8) {
         let (mut sum, mut carry) = data.overflowing_add(self.register_a);
         
-        if self.status.contains(StatusFlags::CARRY) {
+        if self.status.contains(CPUStatus::CARRY) {
             if carry {
                 sum += 1;
             } else {
@@ -195,8 +217,8 @@ impl CPU {
             }
         }
 
-        self.status.set(StatusFlags::CARRY, carry);
-        self.status.set(StatusFlags::OVERFLOW, (data ^ sum) & (self.register_a ^ sum) & 0x80 != 0);
+        self.status.set(CPUStatus::CARRY, carry);
+        self.status.set(CPUStatus::OVERFLOW, (data ^ sum) & (self.register_a ^ sum) & 0x80 != 0);
 
         self.set_register_a(sum);
     }
@@ -255,9 +277,9 @@ impl CPU {
         let (addr, _) = self.get_op_addr(mode);
         let data = self.mem_read(addr);
 
-        self.status.set(StatusFlags::ZERO, self.register_a & data == 0);
-        self.status.set(StatusFlags::NEGATIVE, data >> 7 == 1);
-        self.status.set(StatusFlags::OVERFLOW, data & StatusFlags::OVERFLOW.bits != 0);
+        self.status.set(CPUStatus::ZERO, self.register_a & data == 0);
+        self.status.set(CPUStatus::NEGATIVE, data >> 7 == 1);
+        self.status.set(CPUStatus::OVERFLOW, data & CPUStatus::OVERFLOW.bits != 0);
     }
 
     fn branch(&mut self, condition: bool) {
@@ -281,7 +303,7 @@ impl CPU {
         let (addr, page_crossed) = self.get_op_addr(mode);
         let data = self.mem_read(addr);
 
-        self.status.set(StatusFlags::CARRY, data <= compare_with);
+        self.status.set(CPUStatus::CARRY, data <= compare_with);
         self.update_zero_and_negative_flags(compare_with.wrapping_sub(data));
         
         if page_crossed {
@@ -290,7 +312,7 @@ impl CPU {
     }
 
     fn dec(&mut self, mode: &AddressingMode) {
-        let (addr, page_crossed) = self.get_op_addr(mode);
+        let (addr, _) = self.get_op_addr(mode);
         let data = self.mem_read(addr).wrapping_sub(1);
 
         self.mem_write(addr, data);
@@ -309,7 +331,7 @@ impl CPU {
     }
 
     fn inc(&mut self, mode: &AddressingMode) {
-        let (addr, page_crossed) = self.get_op_addr(mode);
+        let (addr, _) = self.get_op_addr(mode);
         let data = self.mem_read(addr).wrapping_add(1);
 
         self.update_zero_and_negative_flags(data);
@@ -363,7 +385,7 @@ impl CPU {
     }
 
     fn asl(&mut self, mut data: u8) -> u8 {
-        self.status.set(StatusFlags::CARRY, data >> 7 == 1);
+        self.status.set(CPUStatus::CARRY, data >> 7 == 1);
 
         data <<= 1;
         self.update_zero_and_negative_flags(data);
@@ -382,7 +404,7 @@ impl CPU {
     }
 
     fn lsr(&mut self, data: u8) -> u8 {
-        self.status.set(StatusFlags::CARRY, data & 1 == 1);
+        self.status.set(CPUStatus::CARRY, data & 1 == 1);
 
         data >> 1
     }
@@ -413,7 +435,7 @@ impl CPU {
 
     fn php(&mut self) {
         let mut flags = self.status.clone();
-        flags.insert(StatusFlags::BREAK | StatusFlags::BREAK2);
+        flags.insert(CPUStatus::BREAK | CPUStatus::BREAK2);
         self.stack_push(flags.bits);
     }
 
@@ -424,14 +446,14 @@ impl CPU {
 
     fn plp(&mut self) {
         self.status.bits = self.stack_pop();
-        self.status.remove(StatusFlags::BREAK);
-        self.status.insert(StatusFlags::BREAK2);
+        self.status.remove(CPUStatus::BREAK);
+        self.status.insert(CPUStatus::BREAK2);
     }
 
     fn rol(&mut self, mut data: u8) -> u8 {
-        let carry = self.status.contains(StatusFlags::CARRY);
+        let carry = self.status.contains(CPUStatus::CARRY);
 
-        self.status.set(StatusFlags::CARRY, data >> 7 == 1);
+        self.status.set(CPUStatus::CARRY, data >> 7 == 1);
 
         data <<= 1;
         if carry {
@@ -446,7 +468,7 @@ impl CPU {
         let data = self.mem_read(addr);
         let result = self.rol(data);
 
-        self.status.set(StatusFlags::NEGATIVE, result >> 7 == 1);
+        self.status.set(CPUStatus::NEGATIVE, result >> 7 == 1);
 
         self.mem_write(addr, result);
     }
@@ -457,9 +479,9 @@ impl CPU {
     }
 
     fn ror(&mut self, mut data: u8) -> u8 {
-        let carry = self.status.contains(StatusFlags::CARRY);
+        let carry = self.status.contains(CPUStatus::CARRY);
 
-        self.status.set(StatusFlags::CARRY, data & 1 == 1);
+        self.status.set(CPUStatus::CARRY, data & 1 == 1);
 
         data >>= 1;
         if carry {
@@ -474,7 +496,7 @@ impl CPU {
         let data = self.mem_read(addr);
         let result = self.ror(data);
 
-        self.status.set(StatusFlags::NEGATIVE, result >> 7 == 1);
+        self.status.set(CPUStatus::NEGATIVE, result >> 7 == 1);
 
         self.mem_write(addr, result);
     }
@@ -486,8 +508,8 @@ impl CPU {
 
     fn rti(&mut self) {
         self.status.bits = self.stack_pop();
-        self.status.remove(StatusFlags::BREAK);
-        self.status.insert(StatusFlags::BREAK2);
+        self.status.remove(CPUStatus::BREAK);
+        self.status.insert(CPUStatus::BREAK2);
 
         self.program_counter = self.stack_pop_u16();
     }
@@ -518,8 +540,8 @@ impl CPU {
     }
 
     fn update_zero_and_negative_flags(&mut self, result: u8) {
-        self.status.set(StatusFlags::ZERO, result == 0);
-        self.status.set(StatusFlags::NEGATIVE, result >> 7 == 1);
+        self.status.set(CPUStatus::ZERO, result == 0);
+        self.status.set(CPUStatus::NEGATIVE, result >> 7 == 1);
     }
 
     pub fn load_and_run(&mut self, program: Vec<u8>) {
@@ -540,8 +562,20 @@ impl CPU {
         self.register_x = 0;
         self.register_y = 0;
         self.stack_pointer = STACK_RESET;
-        self.status = StatusFlags::default();
+        self.status = CPUStatus::default();
         self.program_counter = self.mem_read_u16(0xFFFC);
+    }
+
+    fn interrupt(&mut self, interrupt: interrupt::Interrupt) {
+        self.stack_push_u16(self.program_counter);
+        let mut flags = self.status.clone();
+        flags |= interrupt.flags;
+
+        self.stack_push(flags.bits);
+        self.status.insert(CPUStatus::INTERRUPT_DISABLE);
+
+        self.bus.tick(interrupt.cpu_cycles);
+        self.program_counter = self.mem_read_u16(interrupt.vector_addr);
     }
 
     pub fn run<F>(&mut self, mut callback: F) 
@@ -549,6 +583,10 @@ impl CPU {
         let ref opcodes: HashMap<u8, &'static opcodes::OpCode> = *opcodes::OPCODES_MAP;
 
         loop {
+            if self.bus.poll_nmi_interrupt() {
+                self.interrupt(interrupt::NMI);
+            }
+
             callback(self);
 
             let code = self.mem_read(self.program_counter);
@@ -585,34 +623,34 @@ impl CPU {
                 0x66 | 0x76 | 0x6E | 0x7E => self.ror_addr(&opcode.mode),
 
                 //Branch on carry flag
-                /*BCC*/ 0x90 => self.branch(!self.status.contains(StatusFlags::CARRY)),
-                /*BCS*/ 0xB0 => self.branch(self.status.contains(StatusFlags::CARRY)),
+                /*BCC*/ 0x90 => self.branch(!self.status.contains(CPUStatus::CARRY)),
+                /*BCS*/ 0xB0 => self.branch(self.status.contains(CPUStatus::CARRY)),
                 
                 //Branch on zero flag
-                /*BNE*/ 0xD0 => self.branch(!self.status.contains(StatusFlags::ZERO)),
-                /*BEQ*/ 0xF0 => self.branch(self.status.contains(StatusFlags::ZERO)),
+                /*BNE*/ 0xD0 => self.branch(!self.status.contains(CPUStatus::ZERO)),
+                /*BEQ*/ 0xF0 => self.branch(self.status.contains(CPUStatus::ZERO)),
 
                 //Check bits
                 0x24 | 0x2C => self.bit(&opcode.mode),
 
                 //Branch on negative
-                /*BPL*/ 0x10 => self.branch(!self.status.contains(StatusFlags::NEGATIVE)),
-                /*BMI*/ 0x30 => self.branch(self.status.contains(StatusFlags::NEGATIVE)),
+                /*BPL*/ 0x10 => self.branch(!self.status.contains(CPUStatus::NEGATIVE)),
+                /*BMI*/ 0x30 => self.branch(self.status.contains(CPUStatus::NEGATIVE)),
 
                 //Branch on overflow flag
-                /*BVC*/ 0x50 => self.branch(!self.status.contains(StatusFlags::OVERFLOW)),
-                /*BVS*/ 0x70 => self.branch(self.status.contains(StatusFlags::OVERFLOW)),
+                /*BVC*/ 0x50 => self.branch(!self.status.contains(CPUStatus::OVERFLOW)),
+                /*BVS*/ 0x70 => self.branch(self.status.contains(CPUStatus::OVERFLOW)),
                 
                 //Set flags
-                /*SEC*/ 0x38 => self.status.insert(StatusFlags::CARRY),
-                /*SED*/ 0xF8 => self.status.insert(StatusFlags::DECIMAL_MODE),
-                /*SEI*/ 0x78 => self.status.insert(StatusFlags::INTERRUPT_DISABLE),
+                /*SEC*/ 0x38 => self.status.insert(CPUStatus::CARRY),
+                /*SED*/ 0xF8 => self.status.insert(CPUStatus::DECIMAL_MODE),
+                /*SEI*/ 0x78 => self.status.insert(CPUStatus::INTERRUPT_DISABLE),
                 
                 //Clear flags
-                /*CLC*/ 0x18 => self.status.remove(StatusFlags::CARRY),
-                /*CLD*/ 0xD8 => self.status.remove(StatusFlags::DECIMAL_MODE),
-                /*CLI*/ 0x58 => self.status.remove(StatusFlags::INTERRUPT_DISABLE),
-                /*CLV*/ 0xB8 => self.status.remove(StatusFlags::OVERFLOW),
+                /*CLC*/ 0x18 => self.status.remove(CPUStatus::CARRY),
+                /*CLD*/ 0xD8 => self.status.remove(CPUStatus::DECIMAL_MODE),
+                /*CLI*/ 0x58 => self.status.remove(CPUStatus::INTERRUPT_DISABLE),
+                /*CLV*/ 0xB8 => self.status.remove(CPUStatus::OVERFLOW),
 
                 //Compare
                 /*CMP*/ 0xC9 | 0xC5 | 0xD5 | 0xCD | 0xDD | 0xD9 | 0xC1 | 0xD1 => self.compare(&opcode.mode, self.register_a),
@@ -686,7 +724,7 @@ impl CPU {
                                 0x74 | 0x80 | 0x82 | 0x89 | 0xC2 | 0xD4 | 0xE2 |0xF4 |
                 /*TOP 3 bytes*/ 0x0C => {}
                  0x1C | 0x3C | 0x5C | 0x7C | 0xDC | 0xFC => {
-                    let (addr, page_cross) = self.get_op_addr(&opcode.mode);
+                    let (_, page_cross) = self.get_op_addr(&opcode.mode);
                     if page_cross {
                         self.bus.tick(1);
                     }
@@ -733,7 +771,7 @@ impl CPU {
     fn anc(&mut self, mode: &AddressingMode) {
         let (addr, _) = self.get_op_addr(mode);
         let data = self.register_a & self.mem_read(addr);
-        self.status.set(StatusFlags::CARRY, data >> 7 == 1);
+        self.status.set(CPUStatus::CARRY, data >> 7 == 1);
         self.set_register_a(data);
     }
 
@@ -753,20 +791,20 @@ impl CPU {
 
         match (data >> 5) & 0b0000_0011 {
             0b00 => {
-                self.status.remove(StatusFlags::CARRY);
-                self.status.remove(StatusFlags::OVERFLOW);
+                self.status.remove(CPUStatus::CARRY);
+                self.status.remove(CPUStatus::OVERFLOW);
             }
             0b01 => {
-                self.status.remove(StatusFlags::CARRY);
-                self.status.insert(StatusFlags::OVERFLOW);
+                self.status.remove(CPUStatus::CARRY);
+                self.status.insert(CPUStatus::OVERFLOW);
             }
             0b10 => {
-                self.status.insert(StatusFlags::CARRY);
-                self.status.insert(StatusFlags::OVERFLOW);
+                self.status.insert(CPUStatus::CARRY);
+                self.status.insert(CPUStatus::OVERFLOW);
             }
             0b11 => {
-                self.status.insert(StatusFlags::CARRY);
-                self.status.remove(StatusFlags::OVERFLOW);
+                self.status.insert(CPUStatus::CARRY);
+                self.status.remove(CPUStatus::OVERFLOW);
             }
             _ => panic!("idk how this went over 0b11"),
         }
@@ -788,7 +826,7 @@ impl CPU {
     fn axs(&mut self) {
         let data = self.mem_read(self.program_counter);
         let (result, carry) = (self.register_x & self.register_a).overflowing_sub(data);
-        self.status.set(StatusFlags::CARRY, carry);
+        self.status.set(CPUStatus::CARRY, !carry);
         self.set_register_x(result);
     }
 
@@ -797,7 +835,7 @@ impl CPU {
         let data = self.mem_read(addr).wrapping_sub(1);
 
         self.mem_write(addr, data);
-        self.status.set(StatusFlags::CARRY, data <= self.register_a);
+        self.status.set(CPUStatus::CARRY, data <= self.register_a);
         self.update_zero_and_negative_flags(self.register_a.wrapping_sub(data));
     }
 
@@ -824,7 +862,7 @@ impl CPU {
         let result = self.ror(data);
 
         self.mem_write(addr, result);
-        self.set_register_a(self.register_a & result);
+        self.add_to_register_a(result);
     }
 
     fn slo(&mut self, mode: &AddressingMode) {
@@ -840,6 +878,7 @@ impl CPU {
         let (addr, _) = self.get_op_addr(mode);
         let data = self.mem_read(addr);
         let result = self.lsr(data);
+        self.mem_write(addr, result);
         self.set_register_a(self.register_a ^ result);
     }
 

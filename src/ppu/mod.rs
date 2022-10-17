@@ -32,6 +32,7 @@ pub struct PPU {
 
     scanline: u16,
     cycles: usize,
+    pub nmi_interrupt: bool,
 }
 
 impl PPU {
@@ -51,6 +52,7 @@ impl PPU {
             read_buf: 0,
             scanline: 0,
             cycles: 0,
+            nmi_interrupt: false,
         }
     }
 
@@ -73,6 +75,15 @@ impl PPU {
             }
         }
 
+    }
+
+    pub fn write_to_ctrl(&mut self, data: u8) {
+        let before_nmi = self.ctrl.contains(PPUCtrl::NMI_GENERATE);
+        self.ctrl.update(data);
+
+        if before_nmi && self.ctrl.contains(PPUCtrl::NMI_GENERATE) && self.status.contains(PPUStatus::VBLANK) {
+            self.nmi_interrupt = true;
+        }
     }
 
     pub fn read_status(&mut self) -> u8 {
